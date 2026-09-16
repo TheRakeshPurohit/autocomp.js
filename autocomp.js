@@ -1,12 +1,16 @@
+let nextId = 0;
+
 export function autocomp(el, options = {}) {
 	const opt = {
-		onQuery: null, onNavigate: null, onSelect: null, onRender: null, debounce: 100, autoSelect: true,...options
+		onQuery: null, onNavigate: null, onSelect: null, onRender: null, debounce: 100, autoSelect: true, ...options
 	};
 
+	const id = `autocomp-${++nextId}`;
 	let box, cur = opt.autoSelect ? 0 : -1, items = [], val, req;
 
 	// Disable browser's default autocomplete behaviour on the input.
 	el.autocomplete = "off";
+	[["role", "combobox"], ["aria-autocomplete", "list"], ["aria-haspopup", "listbox"], ["aria-expanded", "false"]].forEach(([name, value]) => el.setAttribute(name, value));
 
 	// Attach all the events required for the interactions in one go.
 	["input", "keydown", "blur"].forEach(k => el.addEventListener(k, handleEvent));
@@ -77,6 +81,8 @@ export function autocomp(el, options = {}) {
 
 	function createBox() {
 		box = document.createElement("div");
+		box.id = id;
+		box.setAttribute("role", "listbox");
 		Object.assign(box.style, {
 			width: window.getComputedStyle(el).width,
 			position: "absolute",
@@ -86,13 +92,17 @@ export function autocomp(el, options = {}) {
 
 		box.classList.add("autocomp");
 		el.parentNode.insertBefore(box, el.nextSibling);
+		[["aria-controls", id], ["aria-expanded", "true"]].forEach(([name, value]) => el.setAttribute(name, value));
 	}
 
 	function renderResults() {
+		el.removeAttribute("aria-activedescendant");
 		box.innerHTML = "";
 		items.forEach((item, idx) => {
 			const div = document.createElement("div");
 			div.classList.add("autocomp-item");
+			div.id = `${id}-${idx}`;
+			[["role", "option"], ["aria-selected", idx === cur ? "true" : "false"]].forEach(([name, value]) => div.setAttribute(name, value));
 
 			// If there's a custom renderer callback, use it, else, simply insert the value/text as-is.
 			opt.onRender ? div.appendChild(opt.onRender(item)) : div.innerText = item;
@@ -103,6 +113,10 @@ export function autocomp(el, options = {}) {
 			div.addEventListener("mousedown", () => select(idx));
 			box.appendChild(div);
 		});
+
+		if (cur >= 0 && cur < items.length) {
+			el.setAttribute("aria-activedescendant", box.children[cur].id);
+		}
 	}
 
 	function navigate(direction, e) {
@@ -111,10 +125,14 @@ export function autocomp(el, options = {}) {
 		// Remove the previous item's highlight;
 		const prev = box.querySelector(`:nth-child(${cur + 1})`);
 		prev?.classList.remove("autocomp-sel");
+		prev?.setAttribute("aria-selected", "false");
 
 		// Increment the cursor and highlight the next item, cycled between [0, n].
 		cur = (cur + direction + items.length) % items.length;
-		box.querySelector(`:nth-child(${cur + 1})`).classList.add("autocomp-sel");
+		const next = box.querySelector(`:nth-child(${cur + 1})`);
+		next.classList.add("autocomp-sel");
+		next.setAttribute("aria-selected", "true");
+		el.setAttribute("aria-activedescendant", next.id);
 	}
 
 	function select(idx) {
@@ -127,6 +145,8 @@ export function autocomp(el, options = {}) {
 	}
 
 	function destroy() {
+		el.setAttribute("aria-expanded", "false");
+		["aria-controls", "aria-activedescendant"].forEach(name => el.removeAttribute(name));
 		items = [];
 		cur = opt.autoSelect ? 0 : -1;
 		if (box) {
