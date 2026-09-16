@@ -6,7 +6,7 @@ export function autocomp(el, options = {}) {
 	};
 
 	const id = `autocomp-${++nextId}`;
-	let box, cur = opt.autoSelect ? 0 : -1, items = [], val, req;
+	let box, cur = opt.autoSelect ? 0 : -1, items = [], val, req, version = 0;
 
 	// Disable browser's default autocomplete behaviour on the input.
 	el.autocomplete = "off";
@@ -35,6 +35,7 @@ export function autocomp(el, options = {}) {
 			return;
 		}
 		val = newVal;
+		version++;
 
 		// Clear (debounce) any existing pending requests and queue
 		// the next search request.
@@ -43,6 +44,12 @@ export function autocomp(el, options = {}) {
 	}
 
 	function handleKeydown(e) {
+		// Escape early.
+		if (e.keyCode === 27) {
+			destroy();
+			return;
+		}
+
 		if (!box) {
 			return e.keyCode === 38 || e.keyCode === 40
 		}
@@ -52,11 +59,10 @@ export function autocomp(el, options = {}) {
 			case 40: return navigate(1, e); // Down arrow
 			case 9: // Tab
 			case 13: // Enter
-				e.preventDefault();
+				if (e.keyCode === 13 && cur >= 0 && cur < items.length) {
+					e.preventDefault();
+				}
 				select(cur);
-				destroy();
-				return;
-			case 27: // Escape.
 				destroy();
 				return;
 		}
@@ -67,7 +73,14 @@ export function autocomp(el, options = {}) {
 			return;
 		}
 
-		items = await opt.onQuery(val);
+		const curVer = version;
+		const results = await opt.onQuery(val);
+		// Ignore responses for an older/slower query or a dismissed dropdown.
+		if (curVer !== version) {
+			return;
+		}
+
+		items = results;
 		if (!items.length) {
 			return destroy();
 		}
@@ -97,6 +110,10 @@ export function autocomp(el, options = {}) {
 
 	function renderResults() {
 		el.removeAttribute("aria-activedescendant");
+		if (cur >= items.length) {
+			cur = opt.autoSelect ? 0 : -1;
+		}
+
 		box.innerHTML = "";
 		items.forEach((item, idx) => {
 			const div = document.createElement("div");
@@ -110,7 +127,11 @@ export function autocomp(el, options = {}) {
 				div.classList.add("autocomp-sel");
 			}
 
-			div.addEventListener("mousedown", () => select(idx));
+			div.addEventListener("mousedown", (e) => {
+				e.preventDefault();
+				select(idx);
+				destroy();
+			});
 			box.appendChild(div);
 		});
 
@@ -128,7 +149,7 @@ export function autocomp(el, options = {}) {
 		prev?.setAttribute("aria-selected", "false");
 
 		// Increment the cursor and highlight the next item, cycled between [0, n].
-		cur = (cur + direction + items.length) % items.length;
+		cur = cur < 0 ? (direction > 0 ? 0 : items.length - 1) : (cur + direction + items.length) % items.length;
 		const next = box.querySelector(`:nth-child(${cur + 1})`);
 		next.classList.add("autocomp-sel");
 		next.setAttribute("aria-selected", "true");
@@ -136,7 +157,7 @@ export function autocomp(el, options = {}) {
 	}
 
 	function select(idx) {
-		if (!opt.onSelect) {
+		if (!opt.onSelect || idx < 0 || idx >= items.length) {
 			return;
 		}
 
@@ -145,6 +166,9 @@ export function autocomp(el, options = {}) {
 	}
 
 	function destroy() {
+		clearTimeout(req);
+		version++;
+
 		el.setAttribute("aria-expanded", "false");
 		["aria-controls", "aria-activedescendant"].forEach(name => el.removeAttribute(name));
 		items = [];
